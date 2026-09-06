@@ -1,0 +1,82 @@
+summary_type,feature,group,statistic,value
+train_class_descriptive,perclos_relative,Non Drowsy,count,2229.0
+train_class_descriptive,perclos_relative,Non Drowsy,mean,0.1048742070848321
+train_class_descriptive,perclos_relative,Non Drowsy,median,0.04
+train_class_descriptive,perclos_relative,Non Drowsy,std,0.15194537729013324
+train_class_descriptive,perclos_relative,Drowsy,count,2382.0
+train_class_descriptive,perclos_relative,Drowsy,mean,0.39643728678185086
+train_class_descriptive,perclos_relative,Drowsy,median,0.26
+train_class_descriptive,perclos_relative,Drowsy,std,0.357496305408958
+train_class_difference,perclos_relative,Drowsy - Non Drowsy,mean_difference,0.2915630796970188
+train_class_descriptive,ear_relative_mean,Non Drowsy,count,2229.0
+train_class_descriptive,ear_relative_mean,Non Drowsy,mean,0.9137539335027244
+train_class_descriptive,ear_relative_mean,Non Drowsy,median,0.9233471540154755
+train_class_descriptive,ear_relative_mean,Non Drowsy,std,0.0706329579470995
+train_class_descriptive,ear_relative_mean,Drowsy,count,2382.0
+train_class_descriptive,ear_relative_mean,Drowsy,mean,0.7995908172201406
+train_class_descriptive,ear_relative_mean,Drowsy,median,0.8139111586505874
+train_class_descriptive,ear_relative_mean,Drowsy,std,0.17462492448395364
+train_class_difference,ear_relative_mean,Drowsy - Non Drowsy,mean_difference,-0.1141631162825838
+train_class_descriptive,max_eye_closure_seconds,Non Drowsy,count,2229.0
+train_class_descriptive,max_eye_closure_seconds,Non Drowsy,mean,0.5444593988335577
+train_class_descriptive,max_eye_closure_seconds,Non Drowsy,median,0.4
+train_class_descriptive,max_eye_closure_seconds,Non Drowsy,std,0.971266749894408
+train_class_descriptive,max_eye_closure_seconds,Drowsy,count,2382.0
+train_class_descriptive,max_eye_closure_seconds,Drowsy,mean,2.906381192275399
+train_class_descriptive,max_eye_closure_seconds,Drowsy,median,1.2
+train_class_descriptive,max_eye_closure_seconds,Drowsy,std,3.5006571055253475
+train_class_difference,max_eye_closure_seconds,Drowsy - Non Drowsy,mean_difference,2.3619217934418413
+train_class_descriptive,mar_relative_mean,Non Drowsy,count,2229.0
+train_class_descriptive,mar_relative_mean,Non Drowsy,mean,1.2485002096670201
+train_class_descriptive,mar_relative_mean,Non Drowsy,median,1.0417545548905618
+train_class_descriptive,mar_relative_mean,Non Drowsy,std,1.1200144164980192
+train_class_descriptive,mar_relative_mean,Drowsy,count,2382.0
+train_class_descriptive,mar_relative_mean,Drowsy,mean,2.6177767061091517
+train_class_descriptive,mar_relative_mean,Drowsy,median,1.3374755560089358
+train_class_descriptive,mar_relative_mean,Drowsy,std,4.544456983102764
+train_class_difference,mar_relative_mean,Drowsy - Non Drowsy,mean_difference,1.3692764964421316
+train_class_descriptive,pitch_delta_mean,Non Drowsy,count,2229.0
+train_class_descriptive,pitch_delta_mean,Non Drowsy,mean,-0.6461964547718012
+train_class_descriptive,pitch_delta_mean,Non Drowsy,median,-0.3186576223294742
+train_class_descriptive,pitch_delta_mean,Non Drowsy,std,4.961772984509099
+train_class_descriptive,pitch_delta_mean,Drowsy,count,2382.0
+train_class_descriptive,pitch_delta_mean,Drowsy,mean,-1.060475565613748
+train_class_descriptive,pitch_delta_mean,Drowsy,median,-0.9923843720040955
+train_class_descriptive,pitch_delta_mean,Drowsy,std,10.020530529703715
+train_class_difference,pitch_delta_mean,Drowsy - Non Drowsy,mean_difference,-0.4142791108419467
+train_class_descriptive,pitch_delta_std,Non Drowsy,count,2229.0
+train_class_descriptive,pitch_delta_std,Non Drowsy,mean,1.689677803077714
+train_class_descriptive,pitch_delta_std,Non Drowsy,median,0.9494671748915455
+train_class_descriptive,pitch_delta_std,Non Drowsy,std,2.909152396720128
+train_class_descriptive,pitch_delta_std,Drowsy,count,2382.0
+train_class_descriptive,pitch_delta_std,Drowsy,mean,2.714942071538986
+train_class_descriptive,pitch_delta_std,Drowsy,median,1.1429744295431137
+train_class_descriptive,pitch_delta_std,Drowsy,std,5.171881859269478
+train_class_difference,pitch_delta_std,Drowsy - Non Drowsy,mean_difference,1.0252642684612718
+quality,n_sampled_frames,All,missing_rate,0.0
+quality,n_valid_face,All,missing_rate,0.0
+quality,face_detection_rate,All,missing_rate,0.0
+quality,ear_valid_rate,All,missing_rate,0.0
+quality,mar_valid_rate,All,missing_rate,0.0
+quality,ear_relative_mean,All,missing_rate,0.0
+quality,ear_relative_std,All,missing_rate,0.0
+quality,ear_relative_min,All,missing_rate,0.0
+quality,ear_relative_p10,All,missing_rate,0.0
+quality,strong_ear_reduction_rate,All,missing_rate,0.0
+quality,perclos_relative,All,missing_rate,0.0
+quality,max_eye_closure_seconds,All,missing_rate,0.0
+quality,eye_closure_episode_count,All,missing_rate,0.0
+quality,mar_relative_mean,All,missing_rate,0.0
+quality,mar_relative_std,All,missing_rate,0.0
+quality,mar_relative_max,All,missing_rate,0.0
+quality,high_mouth_open_rate,All,missing_rate,0.0
+quality,pitch_delta_mean,All,missing_rate,0.0
+quality,pitch_delta_std,All,missing_rate,0.0
+quality,pitch_delta_range,All,missing_rate,0.0
+quality,yaw_delta_std,All,missing_rate,0.0
+quality,roll_delta_std,All,missing_rate,0.0
+quality,max_head_drop_delta,All,missing_rate,0.0
+quality,abrupt_pitch_movement_count,All,missing_rate,0.0
+quality,valid_face,All,detection_rate,0.9988186824489125
+count,frames,All,n,340298.0
+count,windows,All,n,6633.0

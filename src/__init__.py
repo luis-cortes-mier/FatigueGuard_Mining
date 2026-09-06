@@ -1,0 +1,2 @@
+"""FatigueGuard Mining application package."""
+

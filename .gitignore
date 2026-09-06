@@ -1,0 +1,75 @@
+# Entornos virtuales y variables locales
+.venv/
+venv/
+env/
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+.ipython/
+.ipython_local/
+.jupyter/
+.jupyter_local/
+.mplconfig/
+.torch/
+.torch_cache/
+.mediapipe_models/
+.mplconfig_local/
+
+# IDE y sistema operativo
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Datos originales, derivados y persistencia local
+data/raw/
+data/processed/
+data/*.db
+data/*.db-journal
+data/*.db-shm
+data/*.db-wal
+data/*.sqlite
+data/*.sqlite3
+
+# Solo se versionan los modelos necesarios para ejecutar el artefacto final
+models/*
+!models/.gitkeep
+!models/fatigueguard_landmarks_ml_best.pkl
+!models/mediapipe/
+!models/mediapipe/face_landmarker.task
+
+# Evidencia final seleccionada
+outputs/figures/*
+!outputs/figures/.gitkeep
+!outputs/figures/39_uta_landmarks_ml_test_confusion_matrix.png
+!outputs/figures/40_uta_landmarks_ml_feature_importance.png
+outputs/metrics/*
+!outputs/metrics/.gitkeep
+!outputs/metrics/uta_landmark_feature_summary.csv
+!outputs/metrics/uta_landmarks_ml_test_by_subject.csv
+!outputs/metrics/uta_landmarks_ml_test_metrics.csv
+!outputs/metrics/uta_landmarks_ml_test_predictions.csv
+!outputs/metrics/uta_rldd_excluded_subjects.csv
+!outputs/metrics/uta_rldd_subject_split.csv
+!outputs/metrics/uta_subject_calibration_baselines.csv
+outputs/events/
+
+# Archivo histórico local: conserva experimentos, pero no se publica
+local_archive/
+
+# Inventario de auditoría local
+PROJECT_AUDIT_INVENTORY.csv
+SAFE_TO_DELETE.md
