@@ -120,7 +120,7 @@ del tablero.
 Ejemplo con Windows PowerShell:
 
 ```powershell
-git clone <URL_DEL_REPOSITORIO>
+git clone https://github.com/luis-cortes-mier/FatigueGuard_Mining.git
 cd FatigueGuard_Mining
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
