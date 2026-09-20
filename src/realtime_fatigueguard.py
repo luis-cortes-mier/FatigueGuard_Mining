@@ -1,8 +1,7 @@
-"""First webcam MVP for FatigueGuard Mining.
+"""Aplicación realtime de FatigueGuard Mining.
 
-For development while seated in front of a computer only. This application detects visual
-patterns associated with possible drowsiness; it is not a medical diagnostic system and must
-not be tested while driving or operating machinery.
+Detecta patrones visuales asociados con posible somnolencia. Es un prototipo académico para
+pruebas sentado frente a un computador, no un sistema de diagnóstico médico.
 """
 
 from __future__ import annotations
@@ -23,23 +22,27 @@ from typing import Mapping
 try:
     from .config import (
         ALERT_COOLDOWN_SECONDS, CALIBRATION_SECONDS, DATABASE_PATH,
-        DEFAULT_EQUIPMENT_ID, EYE_CLOSURE_ALERT_SECONDS, HISTORY_SIZE,
+        DEFAULT_EQUIPMENT_ID, EYE_RECOVERY_SECONDS, EYE_STATE_CONFIRMATION_FRAMES,
         INFERENCE_INTERVAL_SECONDS, MAX_ABS_YAW_FOR_EYE_RULE,
         MEDIAPIPE_MODEL_PATH, MIN_BUFFER_FACE_RATE, MIN_BUFFER_SECONDS,
-        MIN_CALIBRATION_VALID_FRAMES, MIN_POSITIVE_WINDOWS, MODEL_PATH,
-        MODEL_THRESHOLD, MPL_CONFIG_DIR, PROCESSING_FPS, WINDOW_SECONDS,
+        MIN_CALIBRATION_VALID_FRAMES, MODEL_ALERT_SECONDS, MODEL_PATH,
+        MODEL_THRESHOLD, MPL_CONFIG_DIR, PROCESSING_FPS,
+        REALTIME_EYE_CLOSED_THRESHOLD, REALTIME_EYE_OPEN_THRESHOLD,
+        SIGNAL_UNSTABLE_SECONDS, WINDOW_SECONDS,
     )
-except ImportError:  # Supports direct execution from src/.
+except ImportError:  # Permite ejecutar el archivo directamente desde src/.
     from config import (
         ALERT_COOLDOWN_SECONDS, CALIBRATION_SECONDS, DATABASE_PATH,
-        DEFAULT_EQUIPMENT_ID, EYE_CLOSURE_ALERT_SECONDS, HISTORY_SIZE,
+        DEFAULT_EQUIPMENT_ID, EYE_RECOVERY_SECONDS, EYE_STATE_CONFIRMATION_FRAMES,
         INFERENCE_INTERVAL_SECONDS, MAX_ABS_YAW_FOR_EYE_RULE,
         MEDIAPIPE_MODEL_PATH, MIN_BUFFER_FACE_RATE, MIN_BUFFER_SECONDS,
-        MIN_CALIBRATION_VALID_FRAMES, MIN_POSITIVE_WINDOWS, MODEL_PATH,
-        MODEL_THRESHOLD, MPL_CONFIG_DIR, PROCESSING_FPS, WINDOW_SECONDS,
+        MIN_CALIBRATION_VALID_FRAMES, MODEL_ALERT_SECONDS, MODEL_PATH,
+        MODEL_THRESHOLD, MPL_CONFIG_DIR, PROCESSING_FPS,
+        REALTIME_EYE_CLOSED_THRESHOLD, REALTIME_EYE_OPEN_THRESHOLD,
+        SIGNAL_UNSTABLE_SECONDS, WINDOW_SECONDS,
     )
 
-# MediaPipe imports matplotlib internally. Keep its cache inside the project.
+# MediaPipe usa matplotlib internamente; su caché se guarda dentro del proyecto.
 MPL_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("MPLCONFIGDIR", str(MPL_CONFIG_DIR))
 
@@ -56,59 +59,130 @@ try:
         get_recent_events, initialize_database, insert_event, upsert_current_status,
     )
     from .facial_features import (
-        EAR_PERCLOS_THRESHOLD, FEATURE_COLUMNS, CalibrationBaseline,
+        FEATURE_COLUMNS, LEFT_EYE, RIGHT_EYE, CalibrationBaseline,
         add_relative_measurements, calculate_calibration_baseline,
         calculate_window_features, invalid_measurement, measurements_from_landmarks,
     )
-except ImportError:  # Supports direct execution from src/.
+except ImportError:  # Permite ejecutar el archivo directamente desde src/.
     from database import get_recent_events, initialize_database, insert_event, upsert_current_status
     from facial_features import (
-        EAR_PERCLOS_THRESHOLD, FEATURE_COLUMNS, CalibrationBaseline,
+        FEATURE_COLUMNS, LEFT_EYE, RIGHT_EYE, CalibrationBaseline,
         add_relative_measurements, calculate_calibration_baseline,
         calculate_window_features, invalid_measurement, measurements_from_landmarks,
     )
 
 
 class EyeClosureTracker:
-    """Track one uninterrupted, valid, frontal, bilateral eye closure."""
+    """Confirma el estado ocular y mide el cierre con fines diagnósticos."""
 
-    def __init__(self, threshold_seconds: float = EYE_CLOSURE_ALERT_SECONDS):
-        self.threshold_seconds = threshold_seconds
+    def __init__(self, confirmation_frames: int = EYE_STATE_CONFIRMATION_FRAMES):
+        self.confirmation_frames = confirmation_frames
         self._closure_start: float | None = None
         self.duration_seconds = 0.0
+        self.closed_frames = 0
+        self.open_frames = 0
+        self.confirmed_state: str | None = None
 
-    def update(self, record: Mapping, now: float) -> bool:
-        valid = bool(record.get("valid_face", False))
-        yaw_delta = record.get("yaw_delta", np.nan)
-        ear_left = record.get("ear_left", np.nan)
-        ear_right = record.get("ear_right", np.nan)
-        ear_base = record.get("ear_base", np.nan)
-        usable = (
-            valid
-            and np.isfinite(yaw_delta)
-            and abs(float(yaw_delta)) <= MAX_ABS_YAW_FOR_EYE_RULE
-            and np.isfinite(ear_left)
-            and np.isfinite(ear_right)
-            and np.isfinite(ear_base)
-            and float(ear_base) > 0
-        )
-        both_closed = usable and (
-            float(ear_left) / float(ear_base) < EAR_PERCLOS_THRESHOLD
-            and float(ear_right) / float(ear_base) < EAR_PERCLOS_THRESHOLD
-        )
-        if both_closed:
+    def update(self, record: Mapping, now: float) -> str | None:
+        candidate = current_eye_state(record)
+        if candidate == "CLOSED":
+            self.closed_frames += 1
+            self.open_frames = 0
+            self.confirmed_state = (
+                "CLOSED" if self.closed_frames >= self.confirmation_frames else None
+            )
+        elif candidate == "OPEN":
+            self.open_frames += 1
+            self.closed_frames = 0
+            self.confirmed_state = (
+                "OPEN" if self.open_frames >= self.confirmation_frames else None
+            )
+        else:
+            self.closed_frames = 0
+            self.open_frames = 0
+            self.confirmed_state = None
+
+        if self.confirmed_state == "CLOSED":
             if self._closure_start is None:
                 self._closure_start = now
             self.duration_seconds = max(0.0, now - self._closure_start)
         else:
-            # Invalid/lateral/lost frames break continuity; separated blinks never accumulate.
+            # Una muestra dudosa corta la continuidad; los parpadeos no se acumulan.
             self._closure_start = None
             self.duration_seconds = 0.0
-        return self.duration_seconds >= self.threshold_seconds
+        return self.confirmed_state
+
+
+def eye_relative_values(record: Mapping) -> tuple[float | None, float | None]:
+    """Devuelve los EAR relativos usados en el diagnóstico ocular."""
+    valid = bool(record.get("valid_face", False))
+    yaw_delta = record.get("yaw_delta", np.nan)
+    ear_base = record.get("ear_base", np.nan)
+    if (
+        not valid
+        or not np.isfinite(yaw_delta)
+        or abs(float(yaw_delta)) > MAX_ABS_YAW_FOR_EYE_RULE
+        or not np.isfinite(ear_base)
+        or float(ear_base) <= 0
+    ):
+        return None, None
+
+    def relative_value(name: str) -> float | None:
+        value = record.get(name, np.nan)
+        if not np.isfinite(value):
+            return None
+        return float(value) / float(ear_base)
+
+    return relative_value("ear_left"), relative_value("ear_right")
+
+
+def current_eye_state(record: Mapping) -> str | None:
+    """Clasifica la muestra dejando una zona neutra entre ambos umbrales."""
+    left_relative, right_relative = eye_relative_values(record)
+    if left_relative is None or right_relative is None:
+        return None
+    left_closed = left_relative < REALTIME_EYE_CLOSED_THRESHOLD
+    right_closed = right_relative < REALTIME_EYE_CLOSED_THRESHOLD
+    left_open = left_relative > REALTIME_EYE_OPEN_THRESHOLD
+    right_open = right_relative > REALTIME_EYE_OPEN_THRESHOLD
+    if left_closed and right_closed:
+        return "CLOSED"
+    if left_open and right_open:
+        return "OPEN"
+    return None
+
+
+def update_eye_recovery(
+    eye_state: str | None,
+    open_since: float | None,
+    now: float,
+) -> tuple[float | None, bool]:
+    """Confirma la recuperación sin modificar la probabilidad del modelo."""
+    if eye_state != "OPEN":
+        return None, False
+    if open_since is None:
+        open_since = now
+    return open_since, now - open_since >= EYE_RECOVERY_SECONDS
+
+
+def update_facial_signal(
+    signal_sufficient: bool,
+    current_signal: str,
+    unstable_since: float | None,
+    now: float,
+) -> tuple[str, float | None]:
+    """Da dos segundos de tolerancia visual antes de mostrar señal inestable."""
+    if signal_sufficient:
+        return "BUENA", None
+    if unstable_since is None:
+        unstable_since = now
+    if current_signal == "BUENA" and now - unstable_since < SIGNAL_UNSTABLE_SECONDS:
+        return "BUENA", unstable_since
+    return "INESTABLE", unstable_since
 
 
 class EventLogger:
-    """Aggregate possible-drowsiness states and persist one SQLite row per episode."""
+    """Agrupa estados de somnolencia posible y guarda un episodio en SQLite."""
 
     def __init__(
         self,
@@ -245,14 +319,207 @@ def overlay_lines(frame, lines: list[tuple[str, tuple[int, int, int]]]) -> None:
         y += 29
 
 
-def classify_decision_history(decisions) -> tuple[str, int]:
-    """Apply the validated 3-of-5 persistence rule to model decisions."""
-    positives = sum(bool(value) for value in decisions)
-    if positives >= MIN_POSITIVE_WINDOWS:
-        return "ALERTA", positives
-    if positives:
-        return "POSIBLE SOMNOLENCIA", positives
-    return "NORMAL", 0
+def update_debug_mode(debug_enabled: bool, key: int) -> bool:
+    """Activa el diagnóstico visual sin cambiar el estado analítico."""
+    if key in (ord("d"), ord("D")):
+        return not debug_enabled
+    return debug_enabled
+
+
+def _debug_number(value: float | None) -> str:
+    if value is None or not np.isfinite(value):
+        return "--"
+    return f"{float(value):.3f}"
+
+
+def _debug_probability(value: float | None) -> str:
+    if value is None or not np.isfinite(value):
+        return "--"
+    return f"{float(value) * 100:.1f}%"
+
+
+def _eye_value_state(relative: float | None) -> str:
+    if relative is None:
+        return "--"
+    if relative < REALTIME_EYE_CLOSED_THRESHOLD:
+        return "CERRADO"
+    if relative > REALTIME_EYE_OPEN_THRESHOLD:
+        return "ABIERTO"
+    return "--"
+
+
+def _draw_debug_section(frame, x: int, y: int, title: str, rows: list[str], accent) -> int:
+    cv2.putText(
+        frame, title, (x, y), cv2.FONT_HERSHEY_SIMPLEX,
+        0.60, accent, 2, cv2.LINE_AA,
+    )
+    cv2.line(frame, (x, y + 9), (frame.shape[1] - 18, y + 9), (70, 78, 88), 1)
+    y += 25
+    for row in rows:
+        cv2.putText(
+            frame, row, (x, y), cv2.FONT_HERSHEY_SIMPLEX,
+            0.48, (235, 238, 242), 1, cv2.LINE_AA,
+        )
+        y += 20
+    return y
+
+
+def draw_eye_debug(
+    frame,
+    landmarks,
+    record: Mapping,
+    closure_seconds: float,
+    probability: float | None,
+    persistence_seconds: float,
+    recovery_active: bool,
+    operational_state: str,
+    alert_origin: str,
+) -> np.ndarray:
+    """Dibuja los datos de diagnóstico sin tapar el rostro."""
+    left_relative, right_relative = eye_relative_values(record)
+    eye_data = (
+        ("OI", LEFT_EYE, "ear_left", left_relative, (255, 210, 0)),
+        ("OD", RIGHT_EYE, "ear_right", right_relative, (255, 120, 255)),
+    )
+    video = frame.copy()
+    height, width = video.shape[:2]
+    eye_points_by_label = {}
+
+    if landmarks is not None:
+        for landmark in landmarks:
+            point = (int(landmark.x * width), int(landmark.y * height))
+            cv2.circle(video, point, 1, (120, 145, 165), -1)
+
+    for label, indices, _, relative, point_color in eye_data:
+        status = _eye_value_state(relative)
+        status_color = {
+            "ABIERTO": (0, 220, 0),
+            "CERRADO": (0, 0, 255),
+            "--": (160, 160, 160),
+        }[status]
+
+        if landmarks is not None and len(landmarks) > max(indices):
+            points = [
+                (int(landmarks[index].x * width), int(landmarks[index].y * height))
+                for index in indices
+            ]
+            eye_points_by_label[label] = points
+            cv2.polylines(video, [np.asarray(points, dtype=np.int32)], True, point_color, 1)
+            for point in points:
+                cv2.circle(video, point, 3, point_color, -1)
+            x_values = [point[0] for point in points]
+            y_values = [point[1] for point in points]
+            top_left = (max(0, min(x_values) - 7), max(0, min(y_values) - 7))
+            bottom_right = (min(width - 1, max(x_values) + 7), min(height - 1, max(y_values) + 7))
+            cv2.rectangle(video, top_left, bottom_right, status_color, 2)
+            text_x = max(6, top_left[0] - 72) if label == "OI" else min(width - 78, bottom_right[0] + 8)
+            text_y = max(18, top_left[1] - 23)
+            short_lines = (label, f"rel: {_debug_number(relative)}", status)
+            for line in short_lines:
+                cv2.putText(
+                    video, line, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.44, (15, 15, 15), 3, cv2.LINE_AA,
+                )
+                cv2.putText(
+                    video, line, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.44, status_color, 1, cv2.LINE_AA,
+                )
+                text_y += 16
+
+    all_eye_points = [point for points in eye_points_by_label.values() for point in points]
+    if all_eye_points:
+        center_x = int(np.mean([point[0] for point in all_eye_points]))
+        top_y = min(point[1] for point in all_eye_points)
+        closure_text = f"CIERRE: {closure_seconds:.1f} s"
+        text_size = cv2.getTextSize(closure_text, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)[0]
+        text_position = (max(5, center_x - text_size[0] // 2), max(24, top_y - 32))
+        cv2.putText(
+            video, closure_text, text_position, cv2.FONT_HERSHEY_SIMPLEX,
+            0.65, (15, 15, 15), 4, cv2.LINE_AA,
+        )
+        cv2.putText(
+            video, closure_text, text_position, cv2.FONT_HERSHEY_SIMPLEX,
+            0.65, (255, 255, 255), 2, cv2.LINE_AA,
+        )
+
+    ear_base = record.get("ear_base", np.nan)
+    panel_width = max(340, int(width * 0.45))
+    canvas = np.zeros((height, width + panel_width, 3), dtype=video.dtype)
+    canvas[:, :width] = video
+    canvas[:, width:] = (22, 26, 32)
+    cv2.line(canvas, (width, 0), (width, height - 1), (95, 105, 118), 2)
+
+    panel_x = width + 22
+    cv2.putText(
+        canvas, "DIAGNOSTICO OCULAR", (panel_x, 32), cv2.FONT_HERSHEY_SIMPLEX,
+        0.66, (255, 255, 255), 2, cv2.LINE_AA,
+    )
+    y = 60
+    for label, _, raw_name, relative, accent in eye_data:
+        y = _draw_debug_section(
+            canvas, panel_x, y, label,
+            [
+                f"EAR raw: {_debug_number(record.get(raw_name))}",
+                f"EAR rel.: {_debug_number(relative)}",
+                f"Estado: {_eye_value_state(relative)}",
+            ],
+            accent,
+        )
+        y += 4
+
+    y = _draw_debug_section(
+        canvas, panel_x, y, "GENERAL",
+        [
+            f"EAR base: {_debug_number(ear_base)}",
+            f"Cerrado: < {REALTIME_EYE_CLOSED_THRESHOLD:.2f}",
+            f"Abierto: > {REALTIME_EYE_OPEN_THRESHOLD:.2f}",
+            f"Cierre actual: {closure_seconds:.1f} s",
+        ],
+        (255, 255, 255),
+    )
+    y += 4
+    _draw_debug_section(
+        canvas, panel_x, y, "MODELO",
+        [
+            f"P RF ultimos 10 s: {_debug_probability(probability)}",
+            f"Threshold RF: {MODEL_THRESHOLD:.2f}",
+            f"Persistencia RF: {persistence_seconds:.1f} / {MODEL_ALERT_SECONDS:.1f} s",
+            f"Recuperacion ocular: {'ACTIVA' if recovery_active else 'NO ACTIVA'}",
+            f"Estado operativo: {operational_state}",
+            f"Origen alerta: {alert_origin}",
+        ],
+        (0, 190, 255),
+    )
+    return canvas
+
+
+def determine_alert_origin(model_alert: bool) -> str:
+    """El Random Forest es la única fuente de alerta."""
+    return "MODELO RF" if model_alert else "--"
+
+
+def model_persistence_seconds(positive_since: float | None, now: float) -> float:
+    if positive_since is None:
+        return 0.0
+    return min(MODEL_ALERT_SECONDS, max(0.0, now - positive_since))
+
+
+def classify_model_probability(
+    probability: float | None,
+    positive_since: float | None,
+    now: float,
+    persistence_blocked: bool = False,
+) -> tuple[str, float | None]:
+    """Mide cuánto tiempo lleva positiva la salida del modelo."""
+    if probability is None or probability < MODEL_THRESHOLD:
+        return "NORMAL", None
+    if persistence_blocked:
+        return "NORMAL", None
+    if positive_since is None:
+        positive_since = now
+    if now - positive_since >= MODEL_ALERT_SECONDS:
+        return "ALERTA", positive_since
+    return "POSIBLE SOMNOLENCIA", positive_since
 
 
 def run_realtime(
@@ -275,7 +542,6 @@ def run_realtime(
     calibration_records: list[dict] = []
     baseline: CalibrationBaseline | None = None
     buffer: deque[dict] = deque()
-    decision_history: deque[bool] = deque(maxlen=HISTORY_SIZE)
     eye_tracker = EyeClosureTracker()
     sound = AlertSound()
     event_logger = EventLogger(session_id, equipment_id, db_path)
@@ -285,12 +551,21 @@ def run_realtime(
     last_inference_time = -np.inf
     last_probability: float | None = None
     last_features: dict | None = None
+    model_positive_since: float | None = None
+    open_eyes_since: float | None = None
+    recovery_active = False
     current_state = "CALIBRANDO"
-    positive_windows = 0
     alert_reasons: list[str] = []
-    face_detected = False
+    alert_origin = "--"
+    facial_signal = "INESTABLE"
+    signal_unstable_since: float | None = None
+    eye_state: str | None = None
+    has_model_inference = False
+    analysis_progress = 0.0
+    buffer_ready = False
+    debug_enabled = bool(debug)
     debug_landmarks = None
-    calibration_message_until = 0.0
+    latest_record = invalid_measurement()
 
     print("FatigueGuard MVP: prueba sentado frente al computador. Presione Q para salir.")
     print(f"Sesión: {session_id} | Equipo: {equipment_id} | SQLite: {db_path}")
@@ -311,11 +586,9 @@ def run_realtime(
                 if result.face_landmarks:
                     debug_landmarks = result.face_landmarks[0]
                     record = measurements_from_landmarks(debug_landmarks, frame.shape[1], frame.shape[0])
-                    face_detected = True
                 else:
                     debug_landmarks = None
                     record = invalid_measurement()
-                    face_detected = False
                 record["timestamp"] = now
 
                 if baseline is None:
@@ -324,7 +597,6 @@ def run_realtime(
                     elapsed = now - application_start
                     if elapsed >= CALIBRATION_SECONDS and len(calibration_records) >= MIN_CALIBRATION_VALID_FRAMES:
                         baseline = calculate_calibration_baseline(calibration_records)
-                        calibration_message_until = now + 2.0
                         current_state = "NORMAL"
                         print("CALIBRACION COMPLETADA", json.dumps(baseline.to_dict(), indent=2))
                     elif elapsed >= CALIBRATION_SECONDS:
@@ -336,15 +608,26 @@ def run_realtime(
                     while buffer and now - float(buffer[0]["timestamp"]) > WINDOW_SECONDS:
                         buffer.popleft()
 
-                    critical_active = eye_tracker.update(record, now)
+                    eye_state = eye_tracker.update(record, now)
+                    open_eyes_since, recovery_active = update_eye_recovery(
+                        eye_state, open_eyes_since, now
+                    )
                     buffer_span = now - float(buffer[0]["timestamp"]) if buffer else 0.0
                     valid_rate = np.mean([bool(item["valid_face"]) for item in buffer]) if buffer else 0.0
+                    minimum_buffer_span = MIN_BUFFER_SECONDS - 1.0 / PROCESSING_FPS
+                    buffer_ready = buffer_span + 1e-9 >= minimum_buffer_span
+                    progress_ratio = min(1.0, buffer_span / minimum_buffer_span)
+                    analysis_progress = np.floor(progress_ratio * WINDOW_SECONDS * 10.0) / 10.0
                     enough_buffer = (
-                        buffer_span >= MIN_BUFFER_SECONDS
+                        buffer_ready
                         and valid_rate >= MIN_BUFFER_FACE_RATE
                     )
                     new_inference = False
-                    if enough_buffer and now - last_inference_time >= INFERENCE_INTERVAL_SECONDS:
+                    if (
+                        record["valid_face"]
+                        and enough_buffer
+                        and now - last_inference_time >= INFERENCE_INTERVAL_SECONDS
+                    ):
                         candidate_features = calculate_window_features(list(buffer), PROCESSING_FPS)
                         feature_frame = pd.DataFrame([candidate_features], columns=expected_features)
                         if list(feature_frame.columns) != expected_features:
@@ -354,33 +637,39 @@ def run_realtime(
                             enough_buffer = False
                         else:
                             last_probability = float(model.predict_proba(feature_frame)[0, 1])
-                            decision_history.append(last_probability >= MODEL_THRESHOLD)
                             last_features = candidate_features
                             last_inference_time = now
                             new_inference = True
+                            has_model_inference = True
 
-                    model_state, positive_windows = classify_decision_history(decision_history)
+                    facial_signal, signal_unstable_since = update_facial_signal(
+                        enough_buffer and bool(record["valid_face"]),
+                        facial_signal,
+                        signal_unstable_since,
+                        now,
+                    )
+
+                    model_state, model_positive_since = classify_model_probability(
+                        last_probability, model_positive_since, now,
+                        persistence_blocked=recovery_active,
+                    )
                     model_alert = model_state == "ALERTA"
                     alert_reasons = []
+                    alert_origin = "--"
                     if not record["valid_face"]:
-                        # Do not preserve or accumulate a drowsiness decision without a face.
-                        decision_history.clear()
+                        # Sin rostro válido no se conserva ni acumula una decisión.
+                        model_positive_since = None
                         last_probability = None
                         last_features = None
-                        current_state = "ROSTRO NO DETECTADO"
-                    elif critical_active:
-                        if model_alert:
-                            alert_reasons.append("MODEL_PERSISTENCE")
-                        alert_reasons.append("PROLONGED_EYE_CLOSURE")
-                        current_state = "ALERTA INMEDIATA" if critical_active else "ALERTA"
-                        sound.play_if_allowed(now)
+                        current_state = "NORMAL"
                     elif not enough_buffer:
-                        decision_history.clear()
+                        model_positive_since = None
                         last_probability = None
                         last_features = None
-                        current_state = "DATOS FACIALES INSUFICIENTES"
+                        current_state = "NORMAL"
                     elif model_alert:
                         alert_reasons.append("MODEL_PERSISTENCE")
+                        alert_origin = determine_alert_origin(model_alert)
                         current_state = "ALERTA"
                         sound.play_if_allowed(now)
                     elif model_state == "POSIBLE SOMNOLENCIA":
@@ -388,7 +677,7 @@ def run_realtime(
                     else:
                         current_state = "NORMAL"
 
-                    active_episode = current_state in {"POSIBLE SOMNOLENCIA", "ALERTA", "ALERTA INMEDIATA"}
+                    active_episode = current_state in {"POSIBLE SOMNOLENCIA", "ALERTA"}
                     event_logger.update(
                         active_condition=active_episode,
                         alert_reasons=alert_reasons,
@@ -404,53 +693,52 @@ def run_realtime(
                 persisted_state = current_state
                 if baseline is None:
                     persisted_state = "CALIBRANDO"
-                elif current_state == "ALERTA INMEDIATA":
-                    persisted_state = "ALERTA"
                 upsert_current_status(
                     session_id=session_id,
                     equipment_id=equipment_id,
                     status=persisted_state,
                     probability=last_probability,
-                    positive_windows=sum(decision_history),
+                    positive_windows=0,
                     db_path=db_path,
                 )
+                latest_record = record
 
             if baseline is None:
                 elapsed = time.perf_counter() - application_start
                 lines = [
                     ("CALIBRANDO - Mantenga posicion normal y permanezca alerta", (0, 220, 255)),
-                    (f"Tiempo: {elapsed:.1f}/{CALIBRATION_SECONDS}s | rostros validos: {len(calibration_records)}", (255, 255, 255)),
+                    (f"Tiempo: {elapsed:.1f}/{CALIBRATION_SECONDS}s | muestras faciales validas: {len(calibration_records)}", (255, 255, 255)),
                 ]
             else:
                 display_state = current_state
-                if not face_detected and not alert_reasons:
-                    display_state = "ROSTRO NO DETECTADO"
+                if not has_model_inference and not buffer_ready and not alert_reasons:
+                    display_state = "PREPARANDO ANALISIS"
                 color = (0, 0, 255) if alert_reasons else ((0, 165, 255) if current_state == "POSIBLE SOMNOLENCIA" else (0, 220, 0))
                 lines = [(display_state, color)]
-                if time.perf_counter() < calibration_message_until:
-                    lines.append(("CALIBRACION COMPLETADA", (0, 220, 0)))
-                positive_windows = sum(decision_history)
-                ear_relative = buffer[-1].get("ear_relative", np.nan) if buffer else np.nan
-                mar_relative = buffer[-1].get("mar_relative", np.nan) if buffer else np.nan
-                pitch_delta = buffer[-1].get("pitch_delta", np.nan) if buffer else np.nan
-                perclos = last_features.get("perclos_relative", np.nan) if last_features else np.nan
-                probability_text = "--" if last_probability is None else f"{last_probability:.3f}"
+                eyes_text = {"OPEN": "ABIERTOS", "CLOSED": "CERRADOS"}.get(eye_state, "--")
                 lines.extend([
-                    (f"P(Drowsy): {probability_text} | positivas: {positive_windows}/{HISTORY_SIZE}", (255, 255, 255)),
-                    (f"EAR rel: {ear_relative:.3f} | PERCLOS: {perclos:.3f}", (255, 255, 255)),
-                    (f"MAR rel: {mar_relative:.3f} | pitch delta: {pitch_delta:.1f}", (255, 255, 255)),
-                    (f"Cierre ocular actual: {eye_tracker.duration_seconds:.1f}s", (255, 255, 255)),
+                    (f"Ojos: {eyes_text}", (255, 255, 255)),
+                    (f"Senal facial: {facial_signal}", (255, 255, 255)),
+                    (f"Cierre ocular: {eye_tracker.duration_seconds:.1f}s", (255, 255, 255)),
+                    (f"Origen alerta: {alert_origin}", (255, 255, 255)),
                 ])
-                if alert_reasons:
-                    lines.append(("Motivo: " + " + ".join(alert_reasons), (0, 0, 255)))
-            if debug and debug_landmarks:
-                for landmark in debug_landmarks:
-                    point = (int(landmark.x * frame.shape[1]), int(landmark.y * frame.shape[0]))
-                    cv2.circle(frame, point, 1, (255, 180, 0), -1)
-            lines.append(("Q: salir", (200, 200, 200)))
+                if display_state == "PREPARANDO ANALISIS":
+                    lines.append((f"{analysis_progress:.1f} / {WINDOW_SECONDS} s", (0, 220, 255)))
+            debug_hint = "D: ocultar diagnostico" if debug_enabled else "D: diagnostico"
+            lines.append((f"{debug_hint} | Q: salir", (200, 200, 200)))
             overlay_lines(frame, lines)
-            cv2.imshow("FatigueGuard Mining - MVP", frame)
-            if cv2.waitKey(1) & 0xFF in (ord("q"), ord("Q")):
+            display_frame = frame
+            if debug_enabled:
+                display_frame = draw_eye_debug(
+                    frame, debug_landmarks, latest_record,
+                    eye_tracker.duration_seconds, last_probability,
+                    model_persistence_seconds(model_positive_since, now),
+                    recovery_active, current_state, alert_origin,
+                )
+            cv2.imshow("FatigueGuard Mining - MVP", display_frame)
+            key = cv2.waitKey(1) & 0xFF
+            debug_enabled = update_debug_mode(debug_enabled, key)
+            if key in (ord("q"), ord("Q")):
                 break
     finally:
         event_logger.close_open_event()
@@ -482,18 +770,29 @@ def run_self_test() -> None:
     probability = float(artifact["model"].predict_proba(frame)[0, 1])
     assert 0.0 <= probability <= 1.0
 
-    tracker = EyeClosureTracker(4.0)
+    tracker = EyeClosureTracker()
     closed_record = {
         "valid_face": True, "yaw_delta": 0.0,
         "ear_left": baseline.ear_base * 0.5,
         "ear_right": baseline.ear_base * 0.5,
         "ear_base": baseline.ear_base,
     }
-    assert not tracker.update(closed_record, 0.0)
-    assert tracker.update(closed_record, 4.1)
+    assert tracker.update(closed_record, 0.0) is None
+    assert tracker.update(closed_record, 0.2) is None
+    assert tracker.update(closed_record, 0.4) == "CLOSED"
+    assert tracker.update(closed_record, 4.4) == "CLOSED"
+    assert tracker.duration_seconds >= 4.0
     open_record = dict(closed_record, ear_left=baseline.ear_base, ear_right=baseline.ear_base)
-    assert not tracker.update(open_record, 4.2) and tracker.duration_seconds == 0.0
-    assert classify_decision_history([True, False, True, False, True]) == ("ALERTA", 3)
+    assert tracker.update(open_record, 4.6) is None and tracker.duration_seconds == 0.0
+    model_state, positive_since = classify_model_probability(MODEL_THRESHOLD, None, 0.0)
+    assert model_state == "POSIBLE SOMNOLENCIA" and positive_since == 0.0
+    model_state, positive_since = classify_model_probability(
+        MODEL_THRESHOLD, positive_since, MODEL_ALERT_SECONDS
+    )
+    assert model_state == "ALERTA"
+    assert classify_model_probability(0.0, positive_since, MODEL_ALERT_SECONDS + 0.1) == (
+        "NORMAL", None
+    )
 
     with tempfile.TemporaryDirectory() as temporary_directory:
         database_path = Path(temporary_directory) / "fatigueguard.db"
@@ -515,7 +814,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--equipment-id", default=DEFAULT_EQUIPMENT_ID, help="Identificador del equipo")
     parser.add_argument("--session-id", default=None, help="Identificador opcional de la sesión")
     parser.add_argument("--database", type=Path, default=DATABASE_PATH, help="Ruta de SQLite")
-    parser.add_argument("--debug", action="store_true", help="Mostrar landmarks durante desarrollo")
+    parser.add_argument(
+        "--debug", action="store_true",
+        help="Iniciar con el diagnostico ocular visible; D permite alternarlo",
+    )
     parser.add_argument("--self-test", action="store_true", help="Verificación técnica sin webcam")
     return parser.parse_args()
 

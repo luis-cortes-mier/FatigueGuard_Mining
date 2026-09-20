@@ -1,4 +1,4 @@
-"""Small SQLite persistence layer shared by realtime and the dashboard."""
+"""Persistencia SQLite compartida por realtime y el dashboard."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Mapping
 
 try:
     from .config import DATABASE_PATH
-except ImportError:  # Supports direct execution from src/.
+except ImportError:  # Permite ejecutar el archivo directamente desde src/.
     from config import DATABASE_PATH
 
 

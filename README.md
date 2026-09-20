@@ -15,12 +15,13 @@ maquinaria.
 Webcam
   → MediaPipe Face Landmarker (~5 FPS)
   → calibración personal (30 s en condición alerta)
-  → EAR, MAR y pose de cabeza relativos
-  → ventana temporal de 10 s / 24 características
-  → Random Forest / P(Somnolencia)
-  → threshold 0.36 + persistencia 3 de 5
-  → regla crítica: cierre bilateral continuo ≥ 4 s
-  → estados, alerta sonora y episodios
+  → ventana rolling de 10 s
+  → 24 características faciales y temporales
+  → Random Forest
+  → P(Somnolencia)
+  → threshold 0.36
+  → persistencia temporal de 8 s
+  → ALERTA
   → SQLite
   → dashboard Streamlit
 ```
@@ -38,8 +39,12 @@ El artefacto principal es `models/fatigueguard_landmarks_ml_best.pkl`:
 - procesamiento aproximado a 5 FPS;
 - ventanas de 10 segundos;
 - threshold `0.36`, seleccionado exclusivamente con Validation;
-- alerta del modelo con al menos 3 decisiones positivas entre las últimas 5;
-- alerta crítica independiente ante cierre ocular bilateral continuo de al menos 4 segundos.
+- inferencia aproximadamente cada segundo;
+- alerta tras mantener positiva la salida del modelo durante al menos 8 segundos;
+- el cierre ocular se conserva como diagnóstico y no genera alertas por sí solo.
+
+La probabilidad `P(Somnolencia)` resume la ventana de los últimos 10 segundos. No representa el
+instante exacto ni se modifica para reflejar el estado ocular actual.
 
 Random Forest y XGBoost fueron comparados con separación estricta por sujeto. Random Forest
 ofreció el mejor equilibrio y fue seleccionado. XGBoost se conserva únicamente como comparador
@@ -58,19 +63,33 @@ académico dentro del notebook 09.
 
 - `CALIBRANDO`: recopila referencias personales mientras el usuario permanece alerta.
 - `NORMAL`: no existe persistencia suficiente de señales asociadas con somnolencia.
-- `POSIBLE SOMNOLENCIA`: una o dos decisiones recientes superan el threshold.
-- `ALERTA`: al menos 3 de las últimas 5 decisiones son positivas o se activa la regla crítica.
+- `POSIBLE SOMNOLENCIA`: la clasificación supera el threshold, pero todavía no completa 8 segundos.
+- `ALERTA`: la clasificación del modelo permanece positiva al menos 8 segundos.
 
 La interfaz realtime muestra además mensajes de calidad cuando no detecta el rostro o el buffer
 no contiene suficientes mediciones válidas.
 
-### Refinamiento en curso
+### Persistencia temporal
 
-La regla `3 de 5` corresponde al funcionamiento actual, pero se considera provisional. Como las
-ventanas de 10 segundos se solapan, un mismo movimiento normal puede aparecer en varias decisiones
-seguidas y producir alarmas repetidas. La siguiente iteración probará una mediana de probabilidades
-recientes, confirmación ocular, tiempos mínimos para entrar y salir de cada estado y una sola alarma
-por episodio. Estos parámetros se validarán con sesiones nuevas y no con el conjunto Test.
+El modelo infiere cada segundo sobre una ventana completa de 10 segundos. Una primera decisión
+positiva inicia un temporizador monotónico: antes de 8 segundos el estado es `POSIBLE SOMNOLENCIA`
+y, si las decisiones continúan positivas, pasa a `ALERTA`. Una inferencia negativa reinicia el
+temporizador. Tras dos segundos continuos con ambos ojos confirmados como abiertos, la persistencia
+queda bloqueada y su temporizador se mantiene reiniciado sin alterar la probabilidad del modelo.
+Cuando termina la recuperación, una probabilidad positiva inicia un periodo nuevo desde cero.
+
+### Estado ocular realtime
+
+El diagnóstico ocular compara cada EAR con la referencia personal:
+
+- `CLOSED`: ambos EAR relativos son menores que `0.75`;
+- `OPEN`: ambos EAR relativos son mayores que `0.85`;
+- entre ambos umbrales, el estado es indeterminado.
+
+Se necesitan tres frames consecutivos para confirmar `OPEN` o `CLOSED`. Dos segundos continuos con
+los ojos abiertos confirman la recuperación, reinician la persistencia del RF y evitan que vuelva a
+acumular mientras los ojos sigan abiertos. El tiempo de cierre ocular solo se muestra como dato
+diagnóstico: los ojos cerrados por sí solos no generan una alerta.
 
 ## Estructura del repositorio
 
@@ -146,7 +165,9 @@ Durante los primeros 30 segundos mantenga una postura normal, ojos abiertos de f
 expresión neutral. La calibración estima de manera robusta `EAR_base`, `MAR_base`, `pitch_base`,
 `yaw_base` y `roll_base`. Si hay menos de 120 frames faciales válidos, el periodo se extiende.
 
-Presione `Q` para finalizar. Los episodios abiertos se cierran correctamente antes de salir.
+Presione `D` para mostrar u ocultar el panel de diagnóstico y `Q` para finalizar. El modo `D` solo
+muestra datos; no cambia la probabilidad ni las decisiones del sistema. Los episodios abiertos se
+cierran correctamente antes de salir.
 
 ## SQLite y verificación de eventos
 
@@ -157,9 +178,10 @@ la webcam:
 python scripts/init_db.py
 ```
 
-Para generar un evento durante una prueba segura, complete la calibración sentado frente al
-computador y mantenga ambos ojos cerrados durante más de cuatro segundos. La regla crítica debe
-mostrar `ALERTA` y registrar `PROLONGED_EYE_CLOSURE`.
+Los eventos de alerta se generan únicamente cuando el Random Forest mantiene una probabilidad igual
+o superior a `0.36` durante al menos ocho segundos sin una recuperación ocular activa. La única
+fuente de alerta es el Random Forest y su origen se muestra como `MODELO RF`. Cerrar los ojos por sí
+solo no fuerza una alerta; su duración se conserva como información diagnóstica.
 
 Para comprobar desde Python que SQLite recibió el episodio:
 
@@ -176,8 +198,8 @@ streamlit run dashboard/app.py
 ```
 
 Pulse **Actualizar** después de producir un evento. El dashboard mostrará sesión, equipo, estado,
-probabilidad, decisiones positivas recientes, última actualización, alertas y episodios. Ambas
-aplicaciones deben ejecutarse desde el mismo clon para compartir `data/fatigueguard.db`.
+probabilidad, última actualización, alertas y episodios. Ambas aplicaciones deben ejecutarse desde
+el mismo clon para compartir `data/fatigueguard.db`.
 
 ## Dataset y reproducción del entrenamiento
 
@@ -212,8 +234,8 @@ python -m unittest discover -s tests -v
 python -m src.realtime_fatigueguard --self-test
 ```
 
-Verifican el modelo, las 24 características, configuración, regla 3/5, cierre ocular de cuatro
-segundos, MediaPipe, SQLite y lectura para el dashboard.
+Verifican el modelo, las 24 características, configuración, persistencia de ocho segundos,
+recuperación ocular, MediaPipe, SQLite y lectura para el dashboard.
 
 ## Limitaciones
 
