@@ -1,4 +1,4 @@
-"""Create the local FatigueGuard SQLite database and its tables."""
+"""Crea la base SQLite local y sus tablas."""
 
 from pathlib import Path
 import sys
@@ -15,4 +15,3 @@ from src.database import initialize_database
 if __name__ == "__main__":
     path = initialize_database(DATABASE_PATH)
     print(f"Base SQLite inicializada: {path}")
-

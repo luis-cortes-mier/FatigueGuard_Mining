@@ -33,6 +33,9 @@ htmlcov/
 .idea/
 .DS_Store
 Thumbs.db
+*.tmp
+*.bak
+*.swp
 
 # Datos originales, derivados y persistencia local
 data/raw/
@@ -51,23 +54,13 @@ models/*
 !models/mediapipe/
 !models/mediapipe/face_landmarker.task
 
-# Evidencia final seleccionada
-outputs/figures/*
-!outputs/figures/.gitkeep
-!outputs/figures/39_uta_landmarks_ml_test_confusion_matrix.png
-!outputs/figures/40_uta_landmarks_ml_feature_importance.png
-outputs/metrics/*
-!outputs/metrics/.gitkeep
-!outputs/metrics/uta_landmark_feature_summary.csv
-!outputs/metrics/uta_landmarks_ml_test_by_subject.csv
-!outputs/metrics/uta_landmarks_ml_test_metrics.csv
-!outputs/metrics/uta_landmarks_ml_test_predictions.csv
-!outputs/metrics/uta_rldd_excluded_subjects.csv
-!outputs/metrics/uta_rldd_subject_split.csv
-!outputs/metrics/uta_subject_calibration_baselines.csv
-outputs/events/
+# Archivos de trabajo y respaldos locales
+tests/
+outputs/
+docs/
+logs/
+*.log
 
-# Archivo histórico local: conserva experimentos, pero no se publica
 local_archive/
 
 # Inventario de auditoría local

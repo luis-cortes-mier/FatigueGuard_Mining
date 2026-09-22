@@ -20,9 +20,6 @@ EYE_RECOVERY_SECONDS = 2.0
 SIGNAL_UNSTABLE_SECONDS = 2.0
 ALERT_COOLDOWN_SECONDS = 10
 
-# Se conserva por compatibilidad con el campo existente del dashboard.
-HISTORY_SIZE = 5
-
 # Controles de calidad y tiempos de la aplicación realtime.
 INFERENCE_INTERVAL_SECONDS = 1.0
 MIN_CALIBRATION_VALID_FRAMES = 120

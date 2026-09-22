@@ -37,7 +37,7 @@ ni carpetas.
 
 1. Descargue y ubique UTA-RLDD como se indica arriba.
 2. Ejecute `notebooks/08_landmarks_feature_engineering.ipynb`. El notebook utiliza el manifiesto
-   versionado `outputs/metrics/uta_rldd_subject_split.csv`, reserva 30 segundos para calibración
+   versionado `data/uta_rldd_subject_split.csv`, reserva 30 segundos para calibración
    personal y reconstruye `data/processed/uta_rldd_landmark_windows.csv`.
 3. Ejecute `notebooks/09_ml_landmarks_xgboost.ipynb` para reproducir Random Forest vs XGBoost.
 

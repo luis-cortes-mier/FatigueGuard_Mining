@@ -181,6 +181,10 @@ def update_facial_signal(
     return "INESTABLE", unstable_since
 
 
+MIN_EVENT_DURATION_SECONDS = 2.0
+EVENT_NORMAL_GRACE_SECONDS = 2.0
+
+
 class EventLogger:
     """Agrupa estados de somnolencia posible y guarda un episodio en SQLite."""
 
@@ -208,6 +212,13 @@ class EventLogger:
     ) -> None:
         timestamp = time.time() if wall_time is None else wall_time
         if active_condition:
+            # Una pausa normal mayor que la gracia separa dos episodios.
+            if (
+                self.active is not None
+                and self.active["normal_since"] is not None
+                and timestamp - self.active["normal_since"] >= EVENT_NORMAL_GRACE_SECONDS
+            ):
+                self._close(self.active["normal_since"])
             if self.active is None:
                 self.active = {
                     "event_id": str(uuid.uuid4()),
@@ -215,7 +226,9 @@ class EventLogger:
                     "timestamp_start": datetime.fromtimestamp(timestamp, timezone.utc).isoformat(timespec="seconds"),
                     "reasons": set(), "probabilities": [], "perclos": [],
                     "max_eye_closure_seconds": 0.0, "alert_triggered": False,
+                    "valid": False, "normal_since": None,
                 }
+            self.active["normal_since"] = None
             self.active["reasons"].update(alert_reasons)
             if probability is not None and np.isfinite(probability):
                 self.active["probabilities"].append(float(probability))
@@ -225,16 +238,41 @@ class EventLogger:
                 self.active["max_eye_closure_seconds"], float(eye_closure_seconds)
             )
             self.active["alert_triggered"] |= bool(alert_triggered)
+            if (
+                self.active["alert_triggered"]
+                or timestamp - self.active["start_epoch"] >= MIN_EVENT_DURATION_SECONDS
+            ):
+                self.active["valid"] = True
         elif self.active is not None:
-            self._close(timestamp)
+            event = self.active
+            if not event["valid"]:
+                if timestamp - event["start_epoch"] < MIN_EVENT_DURATION_SECONDS:
+                    self.active = None
+                    return
+                event["valid"] = True
+            if event["normal_since"] is None:
+                # Guardamos el inicio de la recuperación para no sumar la gracia.
+                event["normal_since"] = timestamp
+            elif timestamp - event["normal_since"] >= EVENT_NORMAL_GRACE_SECONDS:
+                self._close(event["normal_since"])
 
-    def close_open_event(self) -> None:
-        if self.active is not None:
-            self._close(time.time())
+    def close_open_event(self, wall_time: float | None = None) -> None:
+        if self.active is None:
+            return
+        timestamp = time.time() if wall_time is None else wall_time
+        if not self.active["valid"]:
+            if timestamp - self.active["start_epoch"] < MIN_EVENT_DURATION_SECONDS:
+                self.active = None
+                return
+            self.active["valid"] = True
+        normal_since = self.active["normal_since"]
+        end_epoch = normal_since if normal_since is not None else timestamp
+        self._close(end_epoch)
 
     def _close(self, end_epoch: float) -> None:
         event = self.active
-        if event is None:
+        if event is None or not event["valid"]:
+            self.active = None
             return
         probabilities = event["probabilities"]
         perclos_values = event["perclos"]
@@ -799,6 +837,7 @@ def run_self_test() -> None:
         logger = EventLogger("self-test", "EQUIPO_TEST", database_path)
         logger.update(True, ["MODEL_PERSISTENCE"], probability, 0.4, 0.0, True, wall_time=100.0)
         logger.update(False, [], probability, 0.2, 0.0, False, wall_time=103.0)
+        logger.update(False, [], probability, 0.2, 0.0, False, wall_time=105.0)
         rows = get_recent_events(db_path=database_path)
         assert len(rows) == 1 and rows[0]["alert_reason"] == "MODEL_PERSISTENCE"
     landmarker = build_face_landmarker()

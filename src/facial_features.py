@@ -1,7 +1,7 @@
-"""Facial measurements and window features shared by FatigueGuard inference.
+"""Mediciones faciales y variables temporales usadas por FatigueGuard.
 
-The formulas and column names mirror notebooks/08_landmarks_feature_engineering.ipynb.
-No model-specific logic lives in this module.
+Las fórmulas y los nombres de columnas coinciden con el notebook 08.
+Este módulo no contiene decisiones propias del modelo.
 """
 
 from __future__ import annotations
@@ -83,7 +83,7 @@ def _finite(values: Iterable[float | None]) -> np.ndarray:
 
 
 def wrap_angle_degrees(values):
-    """Return the shortest signed angle(s) in [-180, 180)."""
+    """Lleva cada ángulo al intervalo [-180, 180)."""
     return (np.asarray(values) + 180.0) % 360.0 - 180.0
 
 
@@ -100,7 +100,7 @@ def robust_circular_center(values: Iterable[float | None]) -> float:
 def calculate_calibration_baseline(
     records: Sequence[Mapping[str, float | bool | None]],
 ) -> CalibrationBaseline:
-    """Build the personal baseline from alert-condition calibration records only."""
+    """Calcula la referencia personal con las muestras válidas de calibración."""
     valid_records = [record for record in records if bool(record.get("valid_face", False))]
     ear = _finite(record.get("ear_mean") for record in valid_records)
     mar = _finite(record.get("mar") for record in valid_records)
@@ -175,7 +175,7 @@ def measurements_from_landmarks(
     frame_width: int,
     frame_height: int,
 ) -> dict[str, float | bool]:
-    """Convert MediaPipe's 478 normalized landmarks to the training measurements."""
+    """Convierte los 478 landmarks de MediaPipe en las mediciones del entrenamiento."""
     points = np.array([(item.x, item.y, item.z) for item in landmarks], dtype=np.float64)
     ear_left = eye_aspect_ratio(points, LEFT_EYE)
     ear_right = eye_aspect_ratio(points, RIGHT_EYE)
@@ -259,7 +259,7 @@ def calculate_window_features(
     records: Sequence[Mapping[str, float | bool | None]],
     target_fps: float = TARGET_FPS,
 ) -> dict[str, float | int]:
-    """Calculate the exact 24 numeric features used to train the Random Forest."""
+    """Calcula las 24 variables usadas para entrenar el Random Forest."""
     if not records:
         raise ValueError("A window needs at least one record")
 
