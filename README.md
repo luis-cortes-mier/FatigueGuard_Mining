@@ -116,16 +116,15 @@ el monitoreo realtime.
 
 `notebooks/08_landmarks_feature_engineering.ipynb`
 
-Procesamiento con MediaPipe, calibración personal, landmarks, construcción de ventanas y generación
-de las 24 variables.
+Procesa los videos UTA-RLDD y construye las 24 variables utilizadas por el modelo.
 
 `notebooks/09_ml_landmarks_xgboost.ipynb`
 
-Entrenamiento, comparación entre Random Forest y XGBoost, selección del modelo, definición del
-threshold con Validation y evaluación final sobre Test.
+Entrena y compara Random Forest y XGBoost y realiza la evaluación final.
 
-Para ejecutarlos se requieren los datos indicados en `data/README.md` y las dependencias de
-`requirements-notebooks.txt`.
+Los videos originales de UTA-RLDD no se incluyen en el repositorio. Las instrucciones para
+reproducir el procesamiento completo están en `data/README.md`. El dataset procesado se incluye
+para poder ejecutar directamente el notebook de entrenamiento.
 
 ## Estructura del proyecto
 

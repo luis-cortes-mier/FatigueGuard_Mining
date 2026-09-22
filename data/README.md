@@ -40,6 +40,9 @@ ni carpetas.
    versionado `data/uta_rldd_subject_split.csv`, reserva 30 segundos para calibración
    personal y reconstruye `data/processed/uta_rldd_landmark_windows.csv`.
 3. Ejecute `notebooks/09_ml_landmarks_xgboost.ipynb` para reproducir Random Forest vs XGBoost.
+   Este notebook también puede ejecutarse directamente con el dataset procesado incluido.
 
-`data/raw/`, `data/processed/` y las bases SQLite se excluyen de Git. La aplicación realtime no
-necesita descargar UTA-RLDD: utiliza directamente el modelo ya entrenado incluido en `models/`.
+Los videos de `data/raw/`, los frames derivados y las bases SQLite se excluyen de Git. El archivo
+`data/processed/uta_rldd_landmark_windows.csv` sí se incluye para reproducir el entrenamiento sin
+procesar otra vez los videos. La aplicación realtime utiliza directamente el modelo incluido en
+`models/` y no necesita descargar UTA-RLDD.

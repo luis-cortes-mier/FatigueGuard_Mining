@@ -39,7 +39,9 @@ Thumbs.db
 
 # Datos originales, derivados y persistencia local
 data/raw/
-data/processed/
+data/processed/*
+!data/processed/.gitkeep
+!data/processed/uta_rldd_landmark_windows.csv
 data/*.db
 data/*.db-journal
 data/*.db-shm
